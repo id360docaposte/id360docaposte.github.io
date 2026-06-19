@@ -1,3 +1,8 @@
+---
+layout: default
+title: Guide d'intégration Android
+---
+
 # Guide d'integration ID360SDK Android
 
 Ce document s'adresse aux equipes qui integrent le SDK dans une application Android. Il decrit les points d'entree publics, les prerequis, les parcours d'integration les plus simples et les donnees renvoyees par le SDK.

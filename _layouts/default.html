@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page.title }} — ID360</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      line-height: 1.6;
+      color: #1a1a1a;
+      background: #fafafa;
+      padding: 2rem 1.5rem 4rem;
+      max-width: 52rem;
+      margin: 0 auto;
+    }
+    .back {
+      display: inline-block;
+      margin-bottom: 2rem;
+      font-size: 0.875rem;
+      color: #666;
+    }
+    .back a { color: #0969da; text-decoration: none; }
+    .back a:hover { text-decoration: underline; }
+    .content h1 { font-size: 1.75rem; margin-bottom: 1rem; }
+    .content h2 { font-size: 1.25rem; margin: 2rem 0 0.75rem; padding-bottom: 0.25rem; border-bottom: 1px solid #e5e5e5; }
+    .content h3 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
+    .content p, .content li { color: #333; }
+    .content ul, .content ol { padding-left: 1.5rem; margin-bottom: 1rem; }
+    .content li { margin-bottom: 0.25rem; }
+    .content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0 1.5rem;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08);
+      font-size: 0.9rem;
+    }
+    .content th, .content td {
+      padding: 0.625rem 0.875rem;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+      vertical-align: top;
+    }
+    .content th { background: #f5f5f5; font-weight: 600; }
+    .content tr:last-child td { border-bottom: none; }
+    .content code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.85em;
+      background: #f0f0f0;
+      padding: 0.15em 0.35em;
+      border-radius: 4px;
+    }
+    .content pre {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 1rem 1.25rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 1rem 0 1.5rem;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    .content pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+    .content a { color: #0969da; }
+    .content hr { border: none; border-top: 1px solid #e5e5e5; margin: 2rem 0; }
+  </style>
+</head>
+<body>
+  <p class="back"><a href="/">← Retour à l'accueil</a></p>
+  <div class="content">
+    {{ content }}
+  </div>
+</body>
+</html>

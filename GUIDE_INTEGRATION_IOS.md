@@ -1,3 +1,8 @@
+---
+layout: default
+title: Guide d'intégration iOS
+---
+
 # Guide d'integration ID360SDK iOS
 
 Ce document s'adresse aux equipes qui integrent le SDK dans une application iOS. Il se concentre sur l'usage du SDK, pas sur son developpement interne.
