@@ -7,7 +7,7 @@ title: Guide d'intégration iOS
 
 Ce document s'adresse aux equipes qui integrent le SDK dans une application iOS. Il se concentre sur l'usage du SDK, pas sur son developpement interne.
 
-Pour la documentation mainteneur du SDK, voir [README.md](README.md).
+Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
 
 ## Choisir le bon mode d'integration
 
