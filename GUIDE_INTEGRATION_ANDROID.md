@@ -7,7 +7,7 @@ title: Guide d'intégration Android
 
 Ce document s'adresse aux equipes qui integrent le SDK dans une application Android. Il decrit les points d'entree publics, les prerequis, les parcours d'integration les plus simples et les donnees renvoyees par le SDK.
 
-Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases).
+Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
 
 ## Choisir le bon mode d'integration
 
