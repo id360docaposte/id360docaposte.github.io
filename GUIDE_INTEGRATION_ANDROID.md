@@ -1,13 +1,8 @@
----
-layout: default
-title: Guide d'intégration Android
----
-
 # Guide d'integration ID360SDK Android
 
 Ce document s'adresse aux equipes qui integrent le SDK dans une application Android. Il decrit les points d'entree publics, les prerequis, les parcours d'integration les plus simples et les donnees renvoyees par le SDK.
 
-Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
+Pour la documentation mainteneur du SDK, voir [README.md](README.md).
 
 ## Choisir le bon mode d'integration
 
@@ -61,7 +56,7 @@ Si votre equipe recoit un artefact `release` du SDK, integrez cette variante plu
 
 `ID360FlowActivity` est le point d'entree le plus simple pour une equipe applicative. Vous lancez une Activity et vous recupererez soit un JSON MRZ, soit un JSON NFC, soit un message d'erreur.
 
-### 1. Flux complet MRZ -> NFC
+### 1. Flux complet MRZ -> NFC, sans upload ID360
 
 ```kotlin
 import android.app.Activity
@@ -83,13 +78,26 @@ private val nfcFlowLauncher = registerForActivityResult(
 fun startId360Flow() {
     val intent = ID360FlowActivity.createNfcReadIntent(
         context = this,
-        keyId = "your-key-id",
-        masterKey = "base64-encoded-master-key",
-        retryThreshold = 3,
+        retryThreshold = 3, // erreurs NFC avant nouvelle capture MRZ
         language = "fr"
     )
     nfcFlowLauncher.launch(intent)
 }
+```
+
+Ce flux ne nécessite pas de paramètres ID360 et ne fait pas d'upload de document vers ID360. Le SDK lit la MRZ, utilise les données MRZ pour accéder à la puce NFC, puis renvoie le JSON NFC dans `RESULT_NFC_DATA`.
+
+`retryThreshold` correspond au nombre d'erreurs NFC consécutives avant que le bouton "Réessayer" relance la capture MRZ. Avant ce seuil, "Réessayer" redemande simplement à l'utilisateur de présenter le document à la lecture NFC.
+
+`keyId` et `masterKey` sont optionnels et ne sont utiles que si vous disposez d'une configuration spécifique pour la dérivation de clé PACE :
+
+```kotlin
+val intent = ID360FlowActivity.createNfcReadIntent(
+    context = this,
+    keyId = "your-key-id",
+    masterKey = "base64-encoded-master-key",
+    language = "fr"
+)
 ```
 
 Quand utiliser ce mode:
@@ -109,7 +117,7 @@ val intent = ID360FlowActivity.createDirectNfcReadIntent(
     dateOfBirth = "900115",
     dateOfExpiry = "300115",
     documentType = "P",
-    retryThreshold = 3,
+    retryThreshold = 3, // erreurs NFC avant nouvelle capture MRZ
     language = "fr"
 )
 
@@ -118,9 +126,9 @@ nfcFlowLauncher.launch(intent)
 
 Le flux saute completement l'etape MRZ si `documentNumber`, `dateOfBirth` et `dateOfExpiry` sont tous fournis.
 
-### 3. Flux MRZ seul
+### 3. Lecture MRZ locale, sans upload ID360
 
-Utilisez ce mode si vous voulez seulement capturer la MRZ et l'image du document, sans lecture NFC.
+Utilisez ce mode si vous voulez seulement lire la MRZ, sans lecture NFC et sans upload de document vers ID360.
 
 ```kotlin
 private val mrzFlowLauncher = registerForActivityResult(
@@ -134,14 +142,32 @@ private val mrzFlowLauncher = registerForActivityResult(
 fun startMrzOnlyFlow() {
     val intent = ID360FlowActivity.createMrzReadIntent(
         context = this,
-        apiKey = "your-api-key",
-        apiUrl = "https://api.example.com",
-        documentName = "scan",
         language = "fr"
     )
     mrzFlowLauncher.launch(intent)
 }
 ```
+
+### 4. Lecture MRZ avec upload document vers ID360
+
+Utilisez ce mode si vous voulez aussi laisser le SDK uploader les images du document vers ID360 dans le cadre d'un parcours ID360
+(par exemple document sans puce NFC ou document à deux faces).
+
+```kotlin
+val intent = ID360FlowActivity.createMrzReadIntent(
+    context = this,
+    apiKey = "your-api-key",
+    apiUrl = "https://api.example.com",
+    documentName = "scan", // optionnel : nom du document dans le parcours ID360
+    language = "fr"
+)
+```
+
+- `apiKey` : clé API ID360 envoyée dans le header HTTP `x-api-key`.
+- `apiUrl` : URL de base de l'API ID360. Le SDK construit ensuite l'endpoint d'upload : `{apiUrl}/enrollment/flow/document/{documentName}/`.
+- `documentName` : nom optionnel du document dans le parcours ID360, utilisé dans l'URL d'upload. Si vous ne le fournissez pas, le SDK utilise `scan`.
+
+Sans `apiKey` et `apiUrl`, utilisez plutôt la lecture MRZ locale : le SDK retourne seulement `RESULT_MRZ_DATA` et ne fait pas d'appel backend vers ID360.
 
 ## Integration WebView
 
@@ -169,7 +195,7 @@ Si vous voulez fermer la WebView et afficher un message hote quand l'appareil n'
 window.id360.startNfcRead({
   keyId: "your-key-id",
   masterKey: "base64-encoded-master-key",
-  retryThreshold: 3,
+  retryThreshold: 3, // erreurs NFC avant nouvelle capture MRZ
   language: "fr"
 });
 

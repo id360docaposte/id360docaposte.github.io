@@ -1,21 +1,17 @@
----
-layout: default
-title: Guide d'intégration iOS
----
-
 # Guide d'integration ID360SDK iOS
 
 Ce document s'adresse aux equipes qui integrent le SDK dans une application iOS. Il se concentre sur l'usage du SDK, pas sur son developpement interne.
 
-Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
+ Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
 
 ## Choisir le bon mode d'integration
 
 | Votre besoin | Point d'entree recommande |
 |---|---|
-| Flux complet scan MRZ puis lecture NFC avec ecrans SwiftUI | `ID360FlowView` avec `ID360FlowConfig.nfcRead(...)` |
+| Flux complet scan MRZ puis lecture NFC, sans upload ID360, avec ecrans SwiftUI | `ID360FlowView` avec `ID360FlowConfig.nfcRead(...)` |
 | Lecture NFC directe avec donnees MRZ deja connues | `ID360FlowView` avec `ID360FlowConfig.directNfcRead(...)` |
-| Scan MRZ seul avec upload du document | `ID360FlowView` avec `ID360FlowConfig.mrzRead(...)` |
+| Lecture MRZ locale, sans upload ID360 | `ID360FlowView` avec `ID360FlowConfig.mrzRead(...)` |
+| Lecture MRZ avec upload document vers ID360 | `ID360FlowView` avec `ID360FlowConfig.mrzRead(apiKey:apiUrl:documentName:...)` |
 | Webapp embarquee dans une WKWebView | `ID360WebViewView` |
 | UI 100% personnalisee avec logique SDK | `ID360NfcReader` + `MrzParser` |
 
@@ -86,7 +82,7 @@ Activez egalement la capability `Near Field Communication Tag Reading` dans Xcod
 
 Le point d'entree le plus simple est `ID360FlowView`. Vous lui passez une configuration, puis vous ecoutez les evenements de resultat.
 
-### 1. Flux complet MRZ -> NFC
+### 1. Flux complet MRZ -> NFC, sans upload ID360
 
 ```swift
 import ID360SDK
@@ -96,9 +92,7 @@ struct KycView: View {
     var body: some View {
         ID360FlowView(
             config: .nfcRead(
-                keyId: "your-key-id",
-                masterKey: "base64-encoded-master-key",
-                retryThreshold: 3,
+                retryThreshold: 3, // erreurs NFC avant nouvelle capture MRZ
                 language: "fr"
             )
         ) { event in
@@ -113,6 +107,20 @@ struct KycView: View {
         }
     }
 }
+```
+
+Ce flux ne nécessite pas de paramètres ID360 et ne fait pas d'upload de document vers ID360. Le SDK lit la MRZ, utilise les données MRZ pour accéder à la puce NFC, puis renvoie le JSON NFC dans `.finishedWithNfc`.
+
+`retryThreshold` correspond au nombre d'erreurs NFC consécutives avant que le bouton "Réessayer" relance la capture MRZ. Avant ce seuil, "Réessayer" redemande simplement à l'utilisateur de présenter le document à la lecture NFC.
+
+`keyId` et `masterKey` sont optionnels et ne sont utiles que si vous disposez d'une configuration spécifique pour la dérivation de clé PACE :
+
+```swift
+let config = ID360FlowConfig.nfcRead(
+    keyId: "your-key-id",
+    masterKey: "base64-encoded-master-key",
+    language: "fr"
+)
 ```
 
 Quand utiliser ce mode:
@@ -130,7 +138,7 @@ ID360FlowView(
         dateOfBirth: "900115",
         dateOfExpiry: "300115",
         documentType: "P",
-        retryThreshold: 3,
+        retryThreshold: 3, // erreurs NFC avant nouvelle capture MRZ
         language: "fr"
     )
 ) { event in
@@ -142,14 +150,11 @@ ID360FlowView(
 
 Ce mode saute l'etape MRZ quand `documentNumber`, `dateOfBirth` et `dateOfExpiry` sont fournis.
 
-### 3. Flux MRZ seul
+### 3. Lecture MRZ locale, sans upload ID360
 
 ```swift
 ID360FlowView(
     config: .mrzRead(
-        apiKey: "your-api-key",
-        apiUrl: "https://api.example.com",
-        documentName: "scan",
         language: "fr"
     )
 ) { event in
@@ -159,7 +164,35 @@ ID360FlowView(
 }
 ```
 
-### 4. Personnalisation UI optionnelle
+Sans `apiKey` ni `apiUrl`, le SDK ne fait pas d'appel backend vers ID360, ne déclenche pas de capture verso et renvoie directement `.finishedWithMrz`.
+
+### 4. Lecture MRZ avec upload document vers ID360
+
+Utilisez ce mode si vous voulez laisser le SDK uploader les images du document vers ID360 dans le cadre d'un parcours ID360
+(par exemple document sans puce NFC exploitable).
+
+```swift
+ID360FlowView(
+    config: .mrzRead(
+        apiKey: "your-api-key",
+        apiUrl: "https://api.example.com",
+        documentName: "scan", // optionnel : nom du document dans le parcours ID360
+        language: "fr"
+    )
+) { event in
+    if case .finishedWithMrz(let json) = event {
+        print(json)
+    }
+}
+```
+
+- `apiKey` : clé API ID360 envoyée dans le header HTTP `x-api-key`.
+- `apiUrl` : URL de base de l'API ID360. Le SDK construit ensuite l'endpoint d'upload : `{apiUrl}/enrollment/flow/document/{documentName}/`.
+- `documentName` : nom optionnel du document dans le parcours ID360, utilisé dans l'URL d'upload. Si vous ne le fournissez pas, le SDK utilise `scan`.
+
+Après la lecture MRZ, le SDK consulte sa base RFID. Si le document n'a pas de puce NFC exploitable, il upload le document vers ID360. Si le format détecté nécessite deux faces, il affiche l'écran de capture verso puis upload recto et verso. Si une puce NFC est détectée et utilisable, ce flux MRZ seul n'upload rien et renvoie le résultat MRZ.
+
+### 5. Personnalisation UI optionnelle
 
 ```swift
 let customization = ID360UiCustomization(
@@ -169,7 +202,7 @@ let customization = ID360UiCustomization(
 )
 
 let config = ID360FlowConfig.nfcRead(
-    retryThreshold: 3,
+    retryThreshold: 3, // erreurs NFC avant nouvelle capture MRZ
     language: "fr",
     uiCustomization: customization
 )
@@ -200,16 +233,18 @@ ID360WebViewView(
 
 ```javascript
 window.id360.startNfcRead({
-  keyId: "your-key-id",
-  masterKey: "base64-encoded-master-key",
-  retryThreshold: 3,
+  retryThreshold: 3, // erreurs NFC avant nouvelle capture MRZ
+  language: "fr"
+});
+
+window.id360.startMrzRead({
   language: "fr"
 });
 
 window.id360.startMrzRead({
   apiKey: "your-api-key",
   apiUrl: "https://api.example.com",
-  documentName: "scan",
+  documentName: "scan", // optionnel : nom du document dans le parcours ID360
   language: "fr"
 });
 
@@ -225,6 +260,10 @@ function onId360Error(error) {
     console.error(error.code, error.message);
 }
 ```
+
+Dans `startNfcRead`, `keyId` et `masterKey` peuvent être ajoutés uniquement si vous disposez d'une configuration PACE spécifique.
+
+Dans `startMrzRead`, `apiKey`, `apiUrl` et `documentName` concernent uniquement l'upload document vers ID360. Si vous ne les fournissez pas, le SDK renvoie la MRZ localement sans upload ID360.
 
 Le SDK memorise automatiquement les donnees MRZ d'un `startMrzRead` pour reutiliser ces valeurs lors du `startNfcRead` suivant.
 
@@ -323,4 +362,4 @@ Le chemin le plus simple reste de presenter `ID360FlowView` ou `ID360WebViewView
 
 ### Peut-on integrer le SDK sans lecture NFC?
 
-Oui. Le mode `.mrzRead(...)` permet de faire uniquement le scan MRZ et l'upload du document.
+Oui. Le mode `.mrzRead(...)` permet de faire uniquement le scan MRZ localement, sans upload ID360. Fournissez `apiKey` et `apiUrl` seulement si vous voulez que le SDK upload le document vers ID360 dans le cadre d'un parcours ID360 ; `documentName` reste optionnel et vaut `scan` par défaut.
