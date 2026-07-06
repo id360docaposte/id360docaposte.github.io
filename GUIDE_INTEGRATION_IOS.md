@@ -2,7 +2,7 @@
 
 Ce document s'adresse aux equipes qui integrent le SDK dans une application iOS. Il se concentre sur l'usage du SDK, pas sur son developpement interne.
 
- Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
+Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
 
 ## Choisir le bon mode d'integration
 
@@ -212,16 +212,22 @@ La customisation s'applique surtout aux ecrans autres que la capture camera. `ui
 
 ## Integration WebView
 
-Utilisez `ID360WebViewView` si votre equipe integre le parcours KYC dans une webapp.
+Utilisez `ID360WebViewView` si votre equipe integre le parcours KYC dans une webapp. L'URL passee a la vue doit etre l'URL complete d'un enrolement ID360 fournie par votre backend. Passez cette URL telle quelle, sans ajouter de chemin comme `/capture`.
 
 ### Presentation de la vue
 
 ```swift
 import ID360SDK
 
+let id360EnrollmentURL = "https://id360.example.com/enrollment/..." // URL d'enrôlement ID360 fournie par votre backend
+
 ID360WebViewView(
-    url: "https://your-webapp.com/flow",
+    url: id360EnrollmentURL,
     language: "fr",
+    onEnrollmentFinished: { payload in
+        // payload contient uniquement le statut : {"status":"OK"}
+        print(payload)
+    },
     onIncompatibleNfcDevice: { message in
         // Fermez votre presentation et affichez un message hote.
         print(message)
@@ -248,6 +254,10 @@ window.id360.startMrzRead({
   language: "fr"
 });
 
+window.id360.finishEnrollment({
+  status: "OK" // ou "KO", "FAILED ..." selon votre flow
+});
+
 function onNfcReadSuccess(nfcData) {
   console.log("NFC data", nfcData);
 }
@@ -260,6 +270,8 @@ function onId360Error(error) {
     console.error(error.code, error.message);
 }
 ```
+
+Quand la webapp appelle `finishEnrollment`, l'application hote recoit `onEnrollmentFinished(payload)`. Le payload est une chaine JSON minimale qui contient uniquement le statut, par exemple `{"status":"OK"}`.
 
 Dans `startNfcRead`, `keyId` et `masterKey` peuvent être ajoutés uniquement si vous disposez d'une configuration PACE spécifique.
 

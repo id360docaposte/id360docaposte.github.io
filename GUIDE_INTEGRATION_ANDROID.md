@@ -171,23 +171,45 @@ Sans `apiKey` et `apiUrl`, utilisez plutôt la lecture MRZ locale : le SDK retou
 
 ## Integration WebView
 
-`ID360WebViewActivity` permet d'embarquer une webapp et d'exposer les fonctions natives au JavaScript.
+`ID360WebViewActivity` permet d'embarquer une page d'enrôlement ID360 et d'exposer les fonctions natives au JavaScript.
 
 ### Lancement
 
 ```kotlin
 import com.docaposte.id360sdk.webview.ID360WebViewActivity
 
+val enrollmentUrl = "https://id360.example.com/..." // URL d'enrôlement ID360 fournie par votre backend
+
 val intent = ID360WebViewActivity.createIntent(
     context = this,
-    url = "https://your-webapp.com/flow",
+    url = enrollmentUrl,
     language = "fr"
 )
 
 startActivity(intent)
 ```
 
-Si vous voulez fermer la WebView et afficher un message hote quand l'appareil n'est pas compatible NFC, lancez cette Activity avec `ActivityResultContracts.StartActivityForResult()` et lisez `ID360WebViewActivity.RESULT_ERROR_CODE` / `ID360WebViewActivity.RESULT_ERROR_MESSAGE`.
+Le paramètre `url` doit être l'URL exacte du parcours d'enrôlement ID360 à afficher dans la WebView, reçue ou construite par votre backend pour un `apiKey` d'enrôlement donné.
+
+Si vous voulez continuer le parcours dans votre application hote quand l'enrôlement web est terminé, lancez cette Activity avec `ActivityResultContracts.StartActivityForResult()` et lisez `ID360WebViewActivity.RESULT_ENROLLMENT_PAYLOAD`.
+
+```kotlin
+import org.json.JSONObject
+
+private val webViewLauncher =
+    registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val payload = result.data?.getStringExtra(ID360WebViewActivity.RESULT_ENROLLMENT_PAYLOAD)
+        if (!payload.isNullOrBlank()) {
+            val status = JSONObject(payload).optString("status")
+            // Continuez votre flow hote avec status = OK, KO, FAILED, ...
+            return@registerForActivityResult
+        }
+    }
+
+webViewLauncher.launch(intent)
+```
+
+Les erreurs techniques hote restent disponibles via `ID360WebViewActivity.RESULT_ERROR_CODE` / `ID360WebViewActivity.RESULT_ERROR_MESSAGE`.
 
 ### API JavaScript recommandee
 
@@ -205,6 +227,8 @@ window.id360.startMrzRead({
   documentName: "scan",
   language: "fr"
 });
+
+window.id360.finishEnrollment({ status: "OK" }); // ou "KO", "FAILED", "CANCELED", ...
 
 function onNfcReadSuccess(nfcData) {
   console.log("NFC data", nfcData);
