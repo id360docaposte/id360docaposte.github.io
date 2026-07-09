@@ -1,4 +1,4 @@
-# Guide d'Intégration ID360 SDK iOS
+# Guide d'Intégration ID360 SDK iOS 
 
 Ce guide vous accompagne pas à pas dans l'intégration du SDK ID360 dans votre application iOS, de l'implémentation la plus simple (flux natif standard) aux cas d'usage avancés.
 
