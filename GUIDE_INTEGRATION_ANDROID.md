@@ -1,134 +1,154 @@
-# Guide d'integration ID360SDK Android
+# Guide d'Intégration ID360 SDK Android
 
-Ce document s'adresse aux equipes qui integrent le SDK dans une application Android. Il decrit les points d'entree publics, les prerequis, les parcours d'integration les plus simples et les donnees renvoyees par le SDK.
+Ce guide vous accompagne pas à pas dans l'intégration du SDK ID360 dans votre application Android, de l'implémentation la plus simple (flux natif standard) aux cas d'usage avancés.
 
 Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
+---
 
-## Choisir le bon mode d'integration
+## 🌐 Intégration d'un parcours ID360 en utilisant le SDK (parcours clé en main)
 
-| Votre besoin | Point d'entree recommande |
-|---|---|
-| Flux complet scan MRZ puis lecture NFC avec ecrans natifs | `ID360FlowActivity.createNfcReadIntent(...)` |
-| Lecture NFC directe quand vous avez deja les donnees MRZ | `ID360FlowActivity.createDirectNfcReadIntent(...)` |
-| Scan MRZ seul avec upload de l'image du document | `ID360FlowActivity.createMrzReadIntent(...)` |
-| Webapp embarquee dans une WebView | `ID360WebViewActivity.createIntent(...)` |
-| UI 100% personnalisee avec logique SDK | `ID360SDK` + `MrzParser` |
-| Reutilisation des ecrans Compose du SDK dans votre navigation | `CameraPreviewScreen`, `ImagePreviewScreen`, `NfcReadingScreen` |
 
-## Prerequis
+Le SDK ouvre l'URL d'enrôlement ID360 dans une WebView sécurisée. L'application web pilote le parcours et déclenche les captures natives du téléphone via le pont JavaScript du SDK. L'application Android récupère ensuite le statut final de l'enrôlement.
 
-| Element | Valeur |
-|---|---|
-| `minSdk` | 24 |
-| `compileSdk` | 36 |
-| Kotlin | 1.9+ |
-| Jetpack Compose | requis si vous utilisez les composants UI du SDK |
+### Étape 1 : Lancement de la WebView
+Vous devez obtenir l'URL d'enrôlement depuis votre backend, puis la passer au SDK :
 
-Le SDK declare lui-meme les permissions et features necessaires dans son manifest. Vous n'avez pas de permissions Android supplementaires a ajouter dans l'application consommatrice.
+```kotlin
+import com.docaposte.id360sdk.webview.ID360WebViewActivity
 
-## Ajouter le SDK a votre application
+fun startWebViewFlow(enrollmentUrl: String) {
+    val intent = ID360WebViewActivity.createIntent(
+        context = this,
+        url = enrollmentUrl, // URL du parcours ID360 fournie par votre backend
+        language = "fr"
+    )
+    webViewLauncher.launch(intent)
+}
+```
+> [!IMPORTANT]
+> Ne modifiez pas l'URL fournie par votre backend. Le SDK gère lui-même la navigation interne.
 
-### Integration en module Gradle
+### Étape 2 : Récupérer le statut final
+Déclarez le launcher pour intercepter le signal de fin de parcours ou les éventuelles erreurs techniques :
 
-Ajoutez le module dans `settings.gradle.kts` :
+```kotlin
+import org.json.JSONObject
 
+private val webViewLauncher = registerForActivityResult(
+    ActivityResultContracts.StartActivityForResult()
+) { result ->
+    val payload = result.data?.getStringExtra(ID360WebViewActivity.RESULT_ENROLLMENT_PAYLOAD)
+    
+    if (!payload.isNullOrBlank()) {
+        val status = JSONObject(payload).optString("status")
+        // status possible : "OK", "KO", "FAILED", "CANCELED"
+        // TODO: Traiter la fin de parcours selon le statut
+        return@registerForActivityResult
+    }
+
+    // Gestion des erreurs matérielles ou système
+    val errorCode = result.data?.getStringExtra(ID360WebViewActivity.RESULT_ERROR_CODE)
+    val errorMessage = result.data?.getStringExtra(ID360WebViewActivity.RESULT_ERROR_MESSAGE)
+    // Exemple : errorCode = "NFC_UNAVAILABLE" (si l'appareil n'a pas de puce NFC)
+}
+```
+
+## 🔌 Intégration de la lecture NFC standalone (nécessite obligatoirement un appareil avec lecteur NFC et un document d'identité avec puce NFC)
+
+Ce parcours est recommandé si vous souhaitez intégrer la lecture de document directement dans votre application en utilisant l'interface graphique par défaut du SDK.
+
+Le SDK affiche ses propres écrans, gère la caméra et la puce NFC, puis vous renvoie un JSON contenant les données d'identité extraites.
+
+### Étape 1 : Ajouter le SDK à votre projet
+Dans votre fichier `settings.gradle.kts` :
 ```kotlin
 include(":id360sdk")
 ```
 
-Ajoutez ensuite la dependance dans le module applicatif :
-
+Dans le fichier `build.gradle.kts` de votre module applicatif (ex: `:app`) :
 ```kotlin
 dependencies {
     implementation(project(":id360sdk"))
-
-    // Requis uniquement si vous utilisez les ecrans Compose du SDK
-    implementation(platform("androidx.compose:compose-bom:2025.11.01"))
-    implementation("androidx.compose.material3:material3")
 }
 ```
+> [!NOTE]
+> Le SDK déclare automatiquement dans son manifest les permissions (Caméra et NFC) ainsi que les fonctionnalités matérielles requises. Vous n'avez aucune permission supplémentaire à déclarer dans votre manifeste principal.
+> Si vous recevez le SDK sous forme d'archive `.aar` (release) au lieu du module source, la procédure est identique et l'API publique reste la même.
 
-### Integration a partir d'un artefact distribue
-
-Si votre equipe recoit un artefact `release` du SDK, integrez cette variante plutot qu'un build `debug`. L'API publique reste la meme: les exemples ci-dessous sont valables quel que soit le mode de distribution du SDK.
-
-## Integration recommandee: flux cle en main
-
-`ID360FlowActivity` est le point d'entree le plus simple pour une equipe applicative. Vous lancez une Activity et vous recupererez soit un JSON MRZ, soit un JSON NFC, soit un message d'erreur.
-
-### 1. Flux complet MRZ -> NFC, sans upload ID360
+### Étape 2 : Lancer le flux et récupérer le résultat
+Dans votre `Activity` ou `Fragment`, configurez le launcher standard d'Android pour lancer le flux de capture et traiter le JSON de sortie :
 
 ```kotlin
 import android.app.Activity
 import androidx.activity.result.contract.ActivityResultContracts
 import com.docaposte.id360sdk.flow.ID360FlowActivity
 
+// 1. Enregistrer le récepteur de résultat
 private val nfcFlowLauncher = registerForActivityResult(
     ActivityResultContracts.StartActivityForResult()
 ) { result ->
     if (result.resultCode == Activity.RESULT_OK) {
+        // Succès : récupération du JSON des données de la puce
         val nfcJson = result.data?.getStringExtra(ID360FlowActivity.RESULT_NFC_DATA)
-        // Envoyer ce JSON a votre backend ou le parser dans votre app.
+        // TODO: Envoyer ce JSON à votre backend
     } else {
+        // Annulation utilisateur ou erreur bloquante
         val error = result.data?.getStringExtra(ID360FlowActivity.RESULT_ERROR_MESSAGE)
-        // Gerer le cas d'annulation ou d'erreur bloquante.
+        // TODO: Gérer l'erreur ou l'annulation
     }
 }
 
-fun startId360Flow() {
+// 2. Déclencher le flux
+fun startStandardId360Flow() {
     val intent = ID360FlowActivity.createNfcReadIntent(
         context = this,
-        retryThreshold = 3, // erreurs NFC avant nouvelle capture MRZ
-        language = "fr"
+        language = "fr" // "fr", "en", etc.
     )
     nfcFlowLauncher.launch(intent)
 }
 ```
 
-Ce flux ne nécessite pas de paramètres ID360 et ne fait pas d'upload de document vers ID360. Le SDK lit la MRZ, utilise les données MRZ pour accéder à la puce NFC, puis renvoie le JSON NFC dans `RESULT_NFC_DATA`.
+### Étape 3 : Les données obtenues par défaut
+Le JSON renvoyé dans `RESULT_NFC_DATA` contient les données d'identité "métier" prêtes à être envoyées à votre backend :
+* **Identité** : `firstNames` (prénoms), `lastName` (nom), `gender` (genre), `nationality` (nationalité).
+* **Document** : `documentNumber` (numéro), `birthDate` (date de naissance), `expiryDate` (date d'expiration).
+* **Photo** : `faceImage` (photo d'identité encodée en Base64).
 
-`retryThreshold` correspond au nombre d'erreurs NFC consécutives avant que le bouton "Réessayer" relance la capture MRZ. Avant ce seuil, "Réessayer" redemande simplement à l'utilisateur de présenter le document à la lecture NFC.
+---
 
-`keyId` et `masterKey` sont optionnels et ne sont utiles que si vous disposez d'une configuration spécifique pour la dérivation de clé PACE :
+## ⚙️ Intégration des composants du SDK (pour une utilisation sur mesure)
 
-```kotlin
-val intent = ID360FlowActivity.createNfcReadIntent(
-    context = this,
-    keyId = "your-key-id",
-    masterKey = "base64-encoded-master-key",
-    language = "fr"
-)
-```
+Cette section documente les fonctionnalités d'intégration avancées du SDK pour les cas d'usage spécifiques.
 
-Quand utiliser ce mode:
+### Paramètres de configuration (Optionnels)
+Ces paramètres peuvent être ajoutés lors de l'appel aux méthodes de création d'intents :
+* `retryThreshold` (NFC) : Nombre d'échecs NFC consécutifs avant de reproposer l'étape caméra MRZ (Par défaut : `3`).
+* `keyId`, `masterKey` (NFC) : Clés pour la configuration PACE spécifique. À renseigner uniquement sur demande de vos équipes sécurité.
+* `apiKey`, `apiUrl` (MRZ) : Identifiants pour l'upload d'images vers la plateforme d'enrôlement ID360 cloud.
+* `documentName` (MRZ) : Nom du fichier sur le serveur d'enrôlement (Par défaut : `"scan"`).
+* `uiCustomization` : Instance de `ID360UiCustomization` pour adapter les couleurs du SDK.
 
-- vous voulez laisser le SDK gerer la camera, la lecture NFC et les ecrans de progression ;
-- vous souhaitez recuperer un JSON final pret a transmettre a un backend ;
-- vous ne voulez pas implementer vous-meme la logique MRZ/NFC.
+---
 
-### 2. Flux NFC direct sans etape camera
-
-Utilisez ce mode si vous connaissez deja le numero de document, la date de naissance et la date d'expiration.
+### Lecture NFC seule (composant IHM de lecture NFC)
+Si vous connaissez déjà le numéro de document, la date de naissance et la date d'expiration (ex. saisis manuellement), vous pouvez sauter l'étape caméra :
 
 ```kotlin
 val intent = ID360FlowActivity.createDirectNfcReadIntent(
     context = this,
     documentNumber = "AB1234567",
-    dateOfBirth = "900115",
-    dateOfExpiry = "300115",
-    documentType = "P",
-    retryThreshold = 3, // erreurs NFC avant nouvelle capture MRZ
+    dateOfBirth = "900115",    // Format YYMMDD (ex: 15 janv 1990 -> 900115)
+    dateOfExpiry = "300115",   // Format YYMMDD
+    documentType = "P",        // "P" (Passeport), "I" (Identité), etc.
     language = "fr"
 )
-
 nfcFlowLauncher.launch(intent)
 ```
 
-Le flux saute completement l'etape MRZ si `documentNumber`, `dateOfBirth` et `dateOfExpiry` sont tous fournis.
+---
 
-### 3. Lecture MRZ locale, sans upload ID360
-
-Utilisez ce mode si vous voulez seulement lire la MRZ, sans lecture NFC et sans upload de document vers ID360.
+### Lecture MRZ seule (Composant de lecture MRZ sans upload vers ID360)
+Si vous souhaitez uniquement effectuer la capture caméra de la zone MRZ pour l'analyser localement sans interroger la puce NFC :
 
 ```kotlin
 private val mrzFlowLauncher = registerForActivityResult(
@@ -136,132 +156,68 @@ private val mrzFlowLauncher = registerForActivityResult(
 ) { result ->
     if (result.resultCode == Activity.RESULT_OK) {
         val mrzJson = result.data?.getStringExtra(ID360FlowActivity.RESULT_MRZ_DATA)
+        // Traiter les données MRZ décodées
     }
 }
 
-fun startMrzOnlyFlow() {
-    val intent = ID360FlowActivity.createMrzReadIntent(
-        context = this,
-        language = "fr"
-    )
-    mrzFlowLauncher.launch(intent)
-}
+val intent = ID360FlowActivity.createMrzReadIntent(
+    context = this,
+    language = "fr"
+)
+mrzFlowLauncher.launch(intent)
 ```
 
-### 4. Lecture MRZ avec upload document vers ID360
+---
 
-Utilisez ce mode si vous voulez aussi laisser le SDK uploader les images du document vers ID360 dans le cadre d'un parcours ID360
-(par exemple document sans puce NFC ou document à deux faces).
+### Lecture MRZ seule (Composant de lecture MRZ sans upload vers ID360)
+Si vous utilisez la plateforme d'enrôlement ID360 et devez uploader le document sans lecture NFC :
 
 ```kotlin
 val intent = ID360FlowActivity.createMrzReadIntent(
     context = this,
-    apiKey = "your-api-key",
-    apiUrl = "https://api.example.com",
-    documentName = "scan", // optionnel : nom du document dans le parcours ID360
+    apiKey = "votre-cle-api",
+    apiUrl = "https://api.id360.docaposte.fr",
+    documentName = "recto",
     language = "fr"
 )
+mrzFlowLauncher.launch(intent)
 ```
+Le SDK gère l'upload automatique. S'il s'agit d'un document double face, il enchaîne la capture recto/verso et les charge sur l'endpoint : `{apiUrl}/enrollment/flow/document/{documentName}/`.
 
-- `apiKey` : clé API ID360 envoyée dans le header HTTP `x-api-key`.
-- `apiUrl` : URL de base de l'API ID360. Le SDK construit ensuite l'endpoint d'upload : `{apiUrl}/enrollment/flow/document/{documentName}/`.
-- `documentName` : nom optionnel du document dans le parcours ID360, utilisé dans l'URL d'upload. Si vous ne le fournissez pas, le SDK utilise `scan`.
+---
 
-Sans `apiKey` et `apiUrl`, utilisez plutôt la lecture MRZ locale : le SDK retourne seulement `RESULT_MRZ_DATA` et ne fait pas d'appel backend vers ID360.
-
-## Integration WebView
-
-`ID360WebViewActivity` permet d'embarquer une page d'enrôlement ID360 et d'exposer les fonctions natives au JavaScript.
-
-### Lancement
+### Personnalisation visuelle du SDK
+Vous pouvez passer un objet `ID360UiCustomization` pour adapter les écrans natifs (boutons, textes, icônes) à votre charte :
 
 ```kotlin
-import com.docaposte.id360sdk.webview.ID360WebViewActivity
+import com.docaposte.id360sdk.ID360UiCustomization
 
-val enrollmentUrl = "https://id360.example.com/..." // URL d'enrôlement ID360 fournie par votre backend
+val customization = ID360UiCustomization(
+    ui_button_color = "#0057B8",
+    ui_button_text_color = "#FFFFFF",
+    ui_text_color = "#0F172A"
+)
 
-val intent = ID360WebViewActivity.createIntent(
+val intent = ID360FlowActivity.createNfcReadIntent(
     context = this,
-    url = enrollmentUrl,
-    language = "fr"
+    language = "fr",
+    uiCustomization = customization
 )
-
-startActivity(intent)
 ```
 
-Le paramètre `url` doit être l'URL exacte du parcours d'enrôlement ID360 à afficher dans la WebView, reçue ou construite par votre backend pour un `apiKey` d'enrôlement donné.
+---
 
-Si vous voulez continuer le parcours dans votre application hote quand l'enrôlement web est terminé, lancez cette Activity avec `ActivityResultContracts.StartActivityForResult()` et lisez `ID360WebViewActivity.RESULT_ENROLLMENT_PAYLOAD`.
+### Mode Bas Niveau (Sans l'UI du SDK)
+Si vous possédez votre propre interface de capture et souhaitez piloter nos moteurs :
 
-```kotlin
-import org.json.JSONObject
-
-private val webViewLauncher =
-    registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val payload = result.data?.getStringExtra(ID360WebViewActivity.RESULT_ENROLLMENT_PAYLOAD)
-        if (!payload.isNullOrBlank()) {
-            val status = JSONObject(payload).optString("status")
-            // Continuez votre flow hote avec status = OK, KO, FAILED, ...
-            return@registerForActivityResult
-        }
-    }
-
-webViewLauncher.launch(intent)
-```
-
-Les erreurs techniques hote restent disponibles via `ID360WebViewActivity.RESULT_ERROR_CODE` / `ID360WebViewActivity.RESULT_ERROR_MESSAGE`.
-
-### API JavaScript recommandee
-
-```javascript
-window.id360.startNfcRead({
-  keyId: "your-key-id",
-  masterKey: "base64-encoded-master-key",
-  retryThreshold: 3, // erreurs NFC avant nouvelle capture MRZ
-  language: "fr"
-});
-
-window.id360.startMrzRead({
-  apiKey: "your-api-key",
-  apiUrl: "https://api.example.com",
-  documentName: "scan",
-  language: "fr"
-});
-
-window.id360.finishEnrollment({ status: "OK" }); // ou "KO", "FAILED", "CANCELED", ...
-
-function onNfcReadSuccess(nfcData) {
-  console.log("NFC data", nfcData);
-}
-
-function onMrzReadSuccess(mrzData) {
-  console.log("MRZ data", mrzData);
-}
-
-function onId360Error(error) {
-    console.error(error.code, error.message);
-}
-```
-
-`startNfcRead` reutilise automatiquement une MRZ deja mise en cache par `startMrzRead`. Si aucune MRZ n'est disponible, le SDK effectue d'abord un pre-check MRZ pour detecter l'absence de puce.
-
-- document sans puce NFC : la webapp recoit `onId360Error({ code: "DOCUMENT_WITHOUT_NFC_CHIP", message })` ;
-- appareil sans NFC ou NFC desactive : sur Android, l'Activity WebView peut retourner `RESULT_CANCELED` avec `RESULT_ERROR_CODE = "NFC_UNAVAILABLE"` pour que l'application hote gere elle-meme le retour a l'accueil.
-
-## Integration avancee sans UI SDK
-
-Choisissez ce mode si votre equipe gere deja sa propre experience utilisateur et veut seulement reutiliser le parsing MRZ ou la lecture NFC.
-
-### Parser un texte MRZ
-
+#### 1. Parser une chaîne MRZ brute
 ```kotlin
 import com.docaposte.id360sdk.utils.MrzParser
 
-val mrzResult = MrzParser.parse(rawOcrText)
+val mrzResult = MrzParser.parse(rawOcrText) // Renvoie un objet structuré
 ```
 
-### Lire la puce NFC avec votre propre UI
-
+#### 2. Lire la puce NFC avec votre propre UI
 ```kotlin
 import android.nfc.NfcAdapter
 import android.nfc.Tag
@@ -297,60 +253,51 @@ private fun readTag(tag: Tag) {
     lifecycleScope.launch {
         sdk.readChip(tag, mrzInfo) { result ->
             when (result) {
-                is ScanResult.Progress -> Unit
+                is ScanResult.Progress -> {
+                    // Mettre à jour la progression : result.progress (0 à 100)
+                }
                 is ScanResult.Success -> {
                     val json = result.data.toJson()
                 }
-                is ScanResult.Error -> Unit
+                is ScanResult.Error -> {
+                    // Gérer l'erreur technique (ex. perte de connexion NFC)
+                }
             }
         }
     }
 }
 ```
 
-Dans ce mode, c'est votre application qui doit activer le reader mode NFC et gerer la progression de lecture.
+#### 3. Réutiliser les écrans Compose individuels du SDK
+Le SDK expose individuellement les composants graphiques `CameraPreviewScreen`, `ImagePreviewScreen` et `NfcReadingScreen`. Pour les intégrer dans votre propre navigation Compose, déclarez les dépendances Compose dans votre application :
+```kotlin
+implementation(platform("androidx.compose:compose-bom:2025.11.01"))
+implementation("androidx.compose.material3:material3")
+```
 
-## Donnees renvoyees par le SDK
+## ❓ Aide & Validation
 
-### Resultat NFC
+### FAQ / Dépannage
 
-Le flux renvoie `RESULT_NFC_DATA`, une chaine JSON issue de `ReadData.toJson()`. Vous y trouverez notamment:
+#### Le SDK ne détecte pas le NFC sur mon téléphone de test.
+* Vérifiez que le composant NFC est activé dans les réglages système du téléphone.
+* Retirez les coques de protection contenant des éléments métalliques ou trop épaisses.
+* Plaquez bien le document contre le dos de l'appareil (l'emplacement de l'antenne NFC varie d'un modèle à l'autre).
 
-- l'identite du porteur: `firstNames`, `lastName`, `gender`, `nationality` ;
-- les donnees documentaires: `documentNumber`, `birthDate`, `expiryDate` ;
-- les medias: `faceImage` en Base64 ;
-- les data groups bruts: `dg1Raw`, `dg2Raw`, `dg11Raw`, `dg12Raw`, `dg13Raw`, `dg14Raw`, `dg15Raw`, `sod` ;
-- des elements techniques de securite: `chipAuthStatus`, `activeAuthStatus`, `pacePICCPublicKey`, `apduTrace86`, `bacRndIFD`, `bacKIFD`.
+#### Est-il possible de tester sur un émulateur ?
+Non. Le scan MRZ requiert la caméra arrière et la lecture NFC nécessite un matériel physique absent des ordinateurs de développement. Utilisez impérativement un téléphone physique.
 
-### Resultat MRZ
+#### Quelle est la différence entre une annulation et une erreur ?
+Le SDK retourne `RESULT_CANCELED` pour ces deux cas. Vous devez analyser la chaîne de caractères renvoyée par `RESULT_ERROR_MESSAGE` pour différencier une annulation utilisateur (ex. clic sur retour) d'une erreur bloquante (ex. NFC indisponible).
 
-Le flux renvoie `RESULT_MRZ_DATA`, une chaine JSON avec au minimum:
+#### Qui fournit l'URL d'enrôlement WebView IS360 ?
+C'est votre serveur backend qui doit la générer via les API ID360 et la transmettre à l'application mobile pour initialiser la WebView.
 
-- `documentNumber`
-- `documentType`
-- `countryCode`
-- `dateOfBirth`
-- `dateOfExpiry`
-- `hasRfidChip`
-- `nfcAvailable`
-- `documentName`
+---
 
-## Checklist d'integration
 
-Avant de livrer l'integration, verifiez les points suivants:
 
-- le SDK est ajoute dans le module applicatif en variante `release` pour une distribution externe ;
-- l'application sait recuperer `RESULT_NFC_DATA`, `RESULT_MRZ_DATA` et `RESULT_ERROR_MESSAGE` ;
-- le parcours choisi est clair: flux complet, flux NFC direct, MRZ seul ou WebView ;
-- si vous utilisez le mode sans UI, votre application active bien le reader mode NFC ;
-- si vous utilisez la personnalisation runtime, vous passez les couleurs via `ID360UiCustomization`.
-
-## Questions frequentes
-
-### Que se passe-t-il si le NFC n'est pas disponible?
-
-Si le NFC est requis mais indisponible ou desactive sur l'appareil, le flux retourne `RESULT_CANCELED` avec `RESULT_ERROR_MESSAGE`.
-
-### Peut-on reutiliser les ecrans du SDK dans une navigation Compose existante?
-
-Oui. Les composables `CameraPreviewScreen`, `ImagePreviewScreen` et `NfcReadingScreen` peuvent etre integres dans votre navigation, a condition d'ajouter les dependances Compose cote application.
+### Prérequis Techniques
+* **minSdk** : 24 (Android 7.0)
+* **compileSdk** : 36
+* **Kotlin** : 1.9+
