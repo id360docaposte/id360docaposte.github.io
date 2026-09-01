@@ -2,13 +2,81 @@
 
 Ce guide vous accompagne pas à pas dans l'intégration du SDK ID360 dans votre application Android, de l'implémentation la plus simple (flux natif standard) aux cas d'usage avancés.
 
+Deux distributions mutuellement exclusives sont disponibles :
+
+| Artefact Maven | UI | Cible |
+|---|---|---|
+| `com.docaposte.id360:id360sdk` | Jetpack Compose | Applications Android natives actuelles |
+| `com.docaposte.id360:id360sdk-views` | Android Views | .NET 8 for Android et hôtes sans Compose |
+
+Les deux distributions conservent les mêmes points d'entrée
+`ID360FlowActivity` et `ID360WebViewActivity`, les mêmes extras d'Intent,
+résultats JSON et méthodes du bridge WebView. Avec `id360sdk-views`, les appels
+JavaScript `startMrzRead` et `startNfcRead` déclenchent un parcours caméra/NFC
+entièrement sans Compose. Les Composables réutilisables ne sont disponibles que
+dans l'artefact `id360sdk`. N'ajoutez jamais les deux artefacts à la même
+application.
+
 Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
+
+## 📦 Ajouter le SDK à l'application
+
+### Application Android native avec Compose
+
+```kotlin
+dependencies {
+    implementation("com.docaposte.id360:id360sdk:<VERSION>")
+}
+```
+
+### Application Android sans Compose ou projet .NET 8 for Android
+
+Utilisez exclusivement l'artefact Android Views :
+
+```text
+com.docaposte.id360:id360sdk-views:<VERSION>
+```
+
+Dans un projet de binding .NET 8, l'AAR `id360sdk-views` est le seul AAR ID360
+à binder :
+
+```xml
+<ItemGroup>
+  <AndroidLibrary Include="libs/id360sdk-views-VERSION.aar" Bind="true" />
+</ItemGroup>
+```
+
+Les dépendances ne sont pas incorporées dans l'AAR et ne sont pas dupliquées
+dans l'archive du SDK. Utilisez en priorité les packages NuGet Xamarin.AndroidX
+déjà référencés par l'application. Ajoutez uniquement les dépendances restantes
+comme AAR/JAR non bindés, par exemple :
+
+```xml
+<ItemGroup>
+  <AndroidLibrary Include="libs/dependencies/*.aar" Bind="false" />
+  <AndroidJavaLibrary Include="libs/dependencies/*.jar" Bind="false" />
+</ItemGroup>
+```
+
+Le POM livré avec le SDK constitue la liste de référence des artefacts et de
+leurs versions. Ne réintégrez pas sous forme d'AAR une bibliothèque AndroidX
+déjà fournie par un package NuGet, au risque de créer des classes dupliquées.
+L'artefact Views dépend de Lottie Android Views 6.7.1 pour reproduire les mêmes
+animations que l'interface Compose ; il ne dépend ni de Jetpack Compose ni de
+`lottie-compose`. Dans un binding .NET 8, fournissez cette dépendance comme
+référence non bindée (`Bind="false"`) si elle n'est pas déjà apportée par un
+package NuGet compatible.
+
+> [!IMPORTANT]
+> `id360sdk` et `id360sdk-views` exposent volontairement les mêmes Activities :
+> ils sont alternatifs et ne doivent jamais être référencés ensemble.
+
 ---
 
 ## 🌐 Intégration d'un parcours ID360 en utilisant le SDK (parcours clé en main)
 
 
-Le SDK ouvre l'URL d'enrôlement ID360 dans une WebView sécurisée. L'application web pilote le parcours et déclenche les captures natives du téléphone via le pont JavaScript du SDK. L'application Android récupère ensuite le statut final de l'enrôlement.
+Le SDK ouvre l'URL d'enrôlement ID360 dans une WebView Android. L'application web pilote le parcours et déclenche les captures natives du téléphone via le pont JavaScript du SDK. L'application Android récupère ensuite le statut final de l'enrôlement.
 
 ### Étape 1 : Lancement de la WebView
 Vous devez obtenir l'URL d'enrôlement depuis votre backend, puis la passer au SDK :
@@ -60,20 +128,17 @@ Ce parcours est recommandé si vous souhaitez intégrer la lecture de document d
 Le SDK affiche ses propres écrans, gère la caméra et la puce NFC, puis vous renvoie un JSON contenant les données d'identité extraites.
 
 ### Étape 1 : Ajouter le SDK à votre projet
-Dans votre fichier `settings.gradle.kts` :
-```kotlin
-include(":id360sdk")
-```
 
-Dans le fichier `build.gradle.kts` de votre module applicatif (ex: `:app`) :
-```kotlin
-dependencies {
-    implementation(project(":id360sdk"))
-}
-```
+Choisissez l'un des deux artefacts décrits dans la section « Ajouter le SDK à
+l'application ». Les exemples Kotlin ci-dessous utilisent le même contrat
+d'Activity avec les deux distributions.
+
 > [!NOTE]
 > Le SDK déclare automatiquement dans son manifest les permissions (Caméra et NFC) ainsi que les fonctionnalités matérielles requises. Vous n'avez aucune permission supplémentaire à déclarer dans votre manifeste principal.
-> Si vous recevez le SDK sous forme d'archive `.aar` (release) au lieu du module source, la procédure est identique et l'API publique reste la même.
+> Avec une archive `.aar`, veillez également à intégrer les dépendances listées
+> dans le POM fourni. Sous .NET 8, utilisez les packages NuGet Xamarin
+> correspondants quand ils existent ; les AAR/JAR ajoutés manuellement doivent
+> être embarqués avec `Bind="false"`.
 
 ### Étape 2 : Lancer le flux et récupérer le résultat
 Dans votre `Activity` ou `Fragment`, configurez le launcher standard d'Android pour lancer le flux de capture et traiter le JSON de sortie :
@@ -147,7 +212,7 @@ nfcFlowLauncher.launch(intent)
 
 ---
 
-### Lecture MRZ seule (Composant de lecture MRZ sans upload vers ID360)
+### Lecture MRZ seule sans upload vers ID360
 Si vous souhaitez uniquement effectuer la capture caméra de la zone MRZ pour l'analyser localement sans interroger la puce NFC :
 
 ```kotlin
@@ -169,7 +234,7 @@ mrzFlowLauncher.launch(intent)
 
 ---
 
-### Lecture MRZ seule (Composant de lecture MRZ sans upload vers ID360)
+### Lecture MRZ avec upload vers ID360
 Si vous utilisez la plateforme d'enrôlement ID360 et devez uploader le document sans lecture NFC :
 
 ```kotlin
@@ -269,10 +334,14 @@ private fun readTag(tag: Tag) {
 ```
 
 #### 3. Réutiliser les écrans Compose individuels du SDK
-Le SDK expose individuellement les composants graphiques `CameraPreviewScreen`, `ImagePreviewScreen` et `NfcReadingScreen`. Pour les intégrer dans votre propre navigation Compose, déclarez les dépendances Compose dans votre application :
+Cette option concerne uniquement l'artefact Compose `id360sdk`. Il expose
+individuellement les composants graphiques `CameraPreviewScreen`,
+`ImagePreviewScreen` et `NfcReadingScreen`. Pour les intégrer dans votre propre
+navigation Compose, déclarez les dépendances suivantes :
 ```kotlin
-implementation(platform("androidx.compose:compose-bom:2025.11.01"))
-implementation("androidx.compose.material3:material3")
+implementation("androidx.compose.ui:ui:1.9.5")
+implementation("androidx.compose.material3:material3:1.4.0")
+implementation("com.airbnb.android:lottie-compose:6.7.1")
 ```
 
 ## ❓ Aide & Validation
@@ -290,7 +359,7 @@ Non. Le scan MRZ requiert la caméra arrière et la lecture NFC nécessite un ma
 #### Quelle est la différence entre une annulation et une erreur ?
 Le SDK retourne `RESULT_CANCELED` pour ces deux cas. Vous devez analyser la chaîne de caractères renvoyée par `RESULT_ERROR_MESSAGE` pour différencier une annulation utilisateur (ex. clic sur retour) d'une erreur bloquante (ex. NFC indisponible).
 
-#### Qui fournit l'URL d'enrôlement WebView IS360 ?
+#### Qui fournit l'URL d'enrôlement WebView ID360 ?
 C'est votre serveur backend qui doit la générer via les API ID360 et la transmettre à l'application mobile pour initialiser la WebView.
 
 ---
@@ -299,5 +368,5 @@ C'est votre serveur backend qui doit la générer via les API ID360 et la transm
 
 ### Prérequis Techniques
 * **minSdk** : 24 (Android 7.0)
-* **compileSdk** : 36
+* **compileSdk** : 36 pour `id360sdk` Compose ; 34 ou supérieur pour `id360sdk-views`
 * **Kotlin** : 1.9+
