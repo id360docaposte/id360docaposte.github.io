@@ -2,19 +2,20 @@
 
 Ce guide vous accompagne pas à pas dans l'intégration du SDK ID360 dans votre application Android, de l'implémentation la plus simple (flux natif standard) aux cas d'usage avancés.
 
-Deux distributions mutuellement exclusives sont disponibles :
+Deux distributions mutuellement exclusives sont disponibles dans les archives
+livrées :
 
-| Artefact Maven | UI | Cible |
+| Fichier AAR | UI | Cible |
 |---|---|---|
-| `com.docaposte.id360:id360sdk` | Jetpack Compose | Applications Android natives actuelles |
-| `com.docaposte.id360:id360sdk-views` | Android Views | .NET 8 for Android et hôtes sans Compose |
+| `id360-android-sdk-VERSION.aar` | Jetpack Compose | Applications Android natives actuelles |
+| `id360-android-sdk-views-VERSION.aar` | Android Views | .NET 8 for Android et hôtes sans Compose |
 
 Les deux distributions conservent les mêmes points d'entrée
 `ID360FlowActivity` et `ID360WebViewActivity`, les mêmes extras d'Intent,
-résultats JSON et méthodes du bridge WebView. Avec `id360sdk-views`, les appels
+résultats JSON et méthodes du bridge WebView. Avec la distribution Views, les appels
 JavaScript `startMrzRead` et `startNfcRead` déclenchent un parcours caméra/NFC
 entièrement sans Compose. Les Composables réutilisables ne sont disponibles que
-dans l'artefact `id360sdk`. N'ajoutez jamais les deux artefacts à la même
+dans la distribution Compose. N'ajoutez jamais les deux AAR à la même
 application.
 
 Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360docaposte.github.io/releases)
@@ -23,26 +24,36 @@ Pour télécharger le SDK : [releases](https://github.com/id360docaposte/id360do
 
 ### Application Android native avec Compose
 
+Copiez `id360-android-sdk-VERSION.aar` dans le dossier `app/libs/`, puis référencez le
+fichier depuis le `build.gradle.kts` du module applicatif :
+
 ```kotlin
 dependencies {
-    implementation("com.docaposte.id360:id360sdk:<VERSION>")
+    implementation(files("libs/id360-android-sdk-VERSION.aar"))
 }
 ```
 
-### Application Android sans Compose ou projet .NET 8 for Android
+Ajoutez également les dépendances et versions indiquées dans le POM livré dans
+l'archive. Le SDK n'a pas besoin d'être publié sur un dépôt Maven.
 
-Utilisez exclusivement l'artefact Android Views :
+### Application Android sans Compose
 
-```text
-com.docaposte.id360:id360sdk-views:<VERSION>
+Copiez `id360-android-sdk-views-VERSION.aar` dans `app/libs/` et utilisez exclusivement
+cette distribution :
+
+```kotlin
+dependencies {
+    implementation(files("libs/id360-android-sdk-views-VERSION.aar"))
+}
 ```
 
-Dans un projet de binding .NET 8, l'AAR `id360sdk-views` est le seul AAR ID360
-à binder :
+### Projet .NET 8 for Android
+
+Dans un projet de binding .NET 8, l'AAR Views est le seul AAR ID360 à binder :
 
 ```xml
 <ItemGroup>
-  <AndroidLibrary Include="libs/id360sdk-views-VERSION.aar" Bind="true" />
+  <AndroidLibrary Include="libs/id360-android-sdk-views-VERSION.aar" Bind="true" />
 </ItemGroup>
 ```
 
@@ -58,18 +69,19 @@ comme AAR/JAR non bindés, par exemple :
 </ItemGroup>
 ```
 
-Le POM livré avec le SDK constitue la liste de référence des artefacts et de
-leurs versions. Ne réintégrez pas sous forme d'AAR une bibliothèque AndroidX
+Le POM livré dans l'archive constitue la liste de référence des dépendances et
+de leurs versions ; il n'implique pas l'existence d'un dépôt Maven hébergeant le
+SDK. Ne réintégrez pas sous forme d'AAR une bibliothèque AndroidX
 déjà fournie par un package NuGet, au risque de créer des classes dupliquées.
-L'artefact Views dépend de Lottie Android Views 6.7.1 pour reproduire les mêmes
+La distribution Views dépend de Lottie Android Views 6.7.1 pour reproduire les mêmes
 animations que l'interface Compose ; il ne dépend ni de Jetpack Compose ni de
 `lottie-compose`. Dans un binding .NET 8, fournissez cette dépendance comme
 référence non bindée (`Bind="false"`) si elle n'est pas déjà apportée par un
 package NuGet compatible.
 
 > [!IMPORTANT]
-> `id360sdk` et `id360sdk-views` exposent volontairement les mêmes Activities :
-> ils sont alternatifs et ne doivent jamais être référencés ensemble.
+> Les deux AAR exposent volontairement les mêmes Activities : ils sont
+> alternatifs et ne doivent jamais être référencés ensemble.
 
 ---
 
@@ -127,20 +139,10 @@ Ce parcours est recommandé si vous souhaitez intégrer la lecture de document d
 
 Le SDK affiche ses propres écrans, gère la caméra et la puce NFC, puis vous renvoie un JSON contenant les données d'identité extraites.
 
-### Étape 1 : Ajouter le SDK à votre projet
-
-Choisissez l'un des deux artefacts décrits dans la section « Ajouter le SDK à
-l'application ». Les exemples Kotlin ci-dessous utilisent le même contrat
-d'Activity avec les deux distributions.
-
 > [!NOTE]
 > Le SDK déclare automatiquement dans son manifest les permissions (Caméra et NFC) ainsi que les fonctionnalités matérielles requises. Vous n'avez aucune permission supplémentaire à déclarer dans votre manifeste principal.
-> Avec une archive `.aar`, veillez également à intégrer les dépendances listées
-> dans le POM fourni. Sous .NET 8, utilisez les packages NuGet Xamarin
-> correspondants quand ils existent ; les AAR/JAR ajoutés manuellement doivent
-> être embarqués avec `Bind="false"`.
 
-### Étape 2 : Lancer le flux et récupérer le résultat
+### Étape 1 : Lancer le flux et récupérer le résultat
 Dans votre `Activity` ou `Fragment`, configurez le launcher standard d'Android pour lancer le flux de capture et traiter le JSON de sortie :
 
 ```kotlin
@@ -173,7 +175,7 @@ fun startStandardId360Flow() {
 }
 ```
 
-### Étape 3 : Les données obtenues par défaut
+### Étape 2 : Les données obtenues par défaut
 Le JSON renvoyé dans `RESULT_NFC_DATA` contient les données d'identité "métier" prêtes à être envoyées à votre backend :
 * **Identité** : `firstNames` (prénoms), `lastName` (nom), `gender` (genre), `nationality` (nationalité).
 * **Document** : `documentNumber` (numéro), `birthDate` (date de naissance), `expiryDate` (date d'expiration).
